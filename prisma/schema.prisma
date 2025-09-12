@@ -56,7 +56,8 @@ model SharedLink {
 }
 
 model Session {
-  sid     String   @id
-  data    String
-  expires DateTime
+  id        String    @id @default(cuid())
+  sid       String    @unique
+  data      String
+  expiresAt DateTime?
 }
