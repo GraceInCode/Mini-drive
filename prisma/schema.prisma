@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -18,18 +12,18 @@ model User {
   email     String   @unique
   password  String
   createdAt DateTime @default(now())
-  folders   Folder[]
   files     File[]
+  folders   Folder[]
 }
 
 model Folder {
   id          String       @id @default(cuid())
   name        String
-  owner       User         @relation(fields: [ownerId], references: [id])
   ownerId     String
-  files       File[]
-  sharedLinks SharedLink[]
   createdAt   DateTime     @default(now())
+  files       File[]
+  owner       User         @relation(fields: [ownerId], references: [id])
+  sharedLinks SharedLink[]
 }
 
 model File {
@@ -37,27 +31,27 @@ model File {
   name       String
   size       Int
   mimeType   String
-  localPath  String? // local filesystem path
-  url        String? // remote URL (e.g., Cloudinary URL)
-  folder     Folder?  @relation(fields: [folderId], references: [id])
+  localPath  String?
+  url        String?
   folderId   String?
-  owner      User     @relation(fields: [ownerId], references: [id])
   ownerId    String
   uploadedAt DateTime @default(now())
+  folder     Folder?  @relation(fields: [folderId], references: [id])
+  owner      User     @relation(fields: [ownerId], references: [id])
 }
 
 model SharedLink {
   id        String   @id @default(uuid())
-  folder    Folder   @relation(fields: [folderId], references: [id])
   folderId  String
   token     String   @unique
   expireAt  DateTime
   createdAt DateTime @default(now())
+  folder    Folder   @relation(fields: [folderId], references: [id])
 }
 
 model Session {
-  id        String    @id @default(cuid())
   sid       String    @unique
   data      String
+  id        String    @id @default(cuid())
   expiresAt DateTime?
 }
