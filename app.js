@@ -2,37 +2,102 @@ require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
 const { PrismaClient } = require('@prisma/client');
-const { PrismaSessionStore } = require('@quixo3/prisma-session-store');
 const passport = require('passport');
 const path = require('path');
 const fs = require('fs');
-const { nextTick } = require('process');
-const { type } = require('os');
+const cors = require('cors');
 
 const prisma = new PrismaClient();
 const app = express();
 
+// Custom Prisma Session Store
+class PrismaStore extends session.Store {
+    constructor(prisma) {
+        super();
+        this.prisma = prisma;
+        
+        // Prune expired sessions periodically (every 2 minutes, as in your original)
+        setInterval(async () => {
+            try {
+                await this.prisma.session.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+            } catch (err) {
+                console.error('Error pruning sessions:', err);
+            }
+        }, 2 * 60 * 1000);
+    }
+
+    async get(sid, cb) {
+        try {
+            const sessionRecord = await this.prisma.session.findUnique({ where: { sid } });
+            if (!sessionRecord) return cb(null, null);
+            if (sessionRecord.expiresAt < new Date()) {
+                await this.destroy(sid);
+                return cb(null, null);
+            }
+            try {
+                return cb(null, JSON.parse(sessionRecord.data));
+            } catch (e) {
+                return cb(e);
+            }
+        } catch (err) {
+            cb(err);
+        }
+    }
+
+    async set(sid, sess, cb) {
+        try {
+            const data = JSON.stringify(sess);
+            const expiresAt = new Date(Date.now() + (sess.cookie.maxAge || 86400000)); // Default to 1 day if no maxAge
+            await this.prisma.session.upsert({
+                where: { sid },
+                update: { data, expiresAt },
+                create: { sid, data, expiresAt }
+            });
+            cb(null);
+        } catch (err) {
+            cb(err);
+        }
+    }
+
+    async destroy(sid, cb) {
+        try {
+            await this.prisma.session.deleteMany({ where: { sid } });
+            cb(null);
+        } catch (err) {
+            cb(err);
+        }
+    }
+}
+
+app.use(express.static(path.join(__dirname, 'public')));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// enable CORS for all routes (for simplicity, adjust as needed for production)
+app.set('trust proxy', 1); // trust first proxy if behind one
+
+app.use(cors({
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    credentials: true,
+}));
+
 
 // static uploads folder
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR);
 
-// session
+// session - Use custom PrismaStore
 app.use(session({
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
-    cookie: { maxAge: 1000 * 60 * 60 * 24 }, // 1 day
-    store: new PrismaSessionStore(
-        prisma,
-        {
-            checkPeriod: 2 * 60 * 1000,  // prune expired session every 2 minutes
-            dbRecordIdIsSessionId: true,
-            dbRecordIdFunction: undefined,
-        }
-    )
+    cookie: { 
+      maxAge: 1000 * 60 * 60 * 24, // 1 day
+      secure: false, //
+      sameSite: process.env.NODE_ENV === 'production' ? 'lax' : 'lax' 
+    }, 
+    store: new PrismaStore(prisma)
 }));
 
 // passport strategy wiring 
@@ -62,7 +127,7 @@ function loadRoute(modulePath, ...deps) {
 }
 
 // Use the loader to attach routes
-app.use('/auth', loadRoute('./routes/auth', passport));
+app.use('/auth', loadRoute('./routes/auth', passport, prisma));
 app.use('/folders', loadRoute('./routes/folder', prisma));
 app.use('/files', loadRoute('./routes/files', prisma, UPLOADS_DIR));
 
