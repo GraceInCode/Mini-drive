@@ -96,9 +96,16 @@ module.exports = (prisma, UPLOADS_DIR) => {
             if (!file) return res.status(404).send({ error: 'Not found' });
             
             if (file.url) {
-                // redirect to CDN/cloud URL
-                return res.redirect(file.url);
+                // Modify Cloaudinary URL to force download as attachment with original filename
+                const basename = path.parse(file.name).name; // Get filename without extension
+                const downloadUrl = file.url.replace('/upload/', `/upload/fl_attachment:${encodeURIComponent(basename)}/`);
+                return res.redirect(downloadUrl);
             } else if (file.localPath && fs.existsSync(file.localPath)) {
+                // Set Content-Disposition to force download with original filename
+                res.setHeader('Content-Disposition', `attachment; filename="${file.name}"`);
+                // Set Content-Type to the stored MIME type
+                res.setHeader('Content-Type', file.mimeType);
+                // Stream the local file
                 return res.download(file.localPath, file.name);
             } else {
                 return res.status(404).send({ error: 'File not available' });
