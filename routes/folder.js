@@ -1,3 +1,4 @@
+const { error } = require('console');
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 
@@ -16,7 +17,7 @@ module.exports = (prisma) => {
     router.post('/', async (req, res, next) => {
         try {
             const { name } = req.body;
-            if (!name) return res.status(401).send({ error: 'name required' });
+            if (!name) return res.status(400).send({ error: 'name required' });
             const folder = await prisma.folder.create({
                 data: { name, ownerId: req.user.id }
             });
@@ -27,19 +28,55 @@ module.exports = (prisma) => {
     // List folders for user
     router.get('/', async (req, res, next) => {
         try {
-            const folder = await prisma.folder.findFirst({
-                where: { id: req.params.id, ownerId: req.user.id },
+            const folders = await prisma.folder.findMany({
+                where: { ownerId: req.user.id },
                 include: { files: true }
             });
-            if (!folder) return res.status(404).send({ error: 'Not found' });
+            res.send(folders);
+        } catch (err) { next(err); }
+    });
+
+    // Get single folder
+    router.get('/:id', async (req, res, next) => {
+        try {
+            const folder = await prisma.folder.findUnique({
+                where: { id: req.params.id },
+                include: { files: true }
+            });
+            if (!folder || folder.ownerId !== req.user.id) return res.status(404).send({ error: 'Not found' });
             res.send(folder);
         } catch (err) { next(err); }
     });
 
-    // Update
+    // Update folder (e.g., rename)
     router.patch('/:id', async (req, res, next) => {
         try {
-            await prisma.folder.deleteMany({ where: { id: req.params.id, ownerId: req.user.id }});
+            const folder = await prisma.folder.findUnique({ where:  { id: req.params.id } });
+            if (!folder || folder.ownerId !== req.user.id) return res.status(404).send({ error: 'Not found' });
+
+            // Delete shared links
+            await prisma.sharedLink.deleteMany({ where: { folderId: folder.id } });
+            
+            // Delete files and clean up storage
+            const files = await prisma.file.findMany({ where: { folderId: folder.id } });
+            for (const file of files) {
+                if (file.localPath && fstat.existsSync(file.localPath)) {
+                    fs.unLinkSync(file.localPath);
+                }
+            }
+                await prisma.file.deleteMany({ where: { folderId: folder.id } });
+
+                await prisma.folder.delete({ where: { id: req.params.id } });
+                res.send({ ok: true });
+        } catch (err) { next(err); }
+    });
+
+    // Delete folder
+    router.delete('/:id', async (req, res, next) => {
+        try {
+            const folder = await prisma.folder.findUnique({ where: { id: req.params.id } });
+            if (!folder || folder.ownerId !== req.user.id) return res.status(404).send({ error: 'Not found' });
+            await prisma.folder.delete({ where: { id: req.params.id } });
             res.send({ ok: true });
         } catch (err) { next(err); }
     });
@@ -57,10 +94,10 @@ module.exports = (prisma) => {
             const token = uuidv4();
 
             const shared = await prisma.sharedLink.create({
-                data: { folderId: folder.id, token, expiresAt }
+                data: { folderId: folder.id, token, expireAt: expiresAt }
             });
 
-            const url = `${req.protocol}://${req.get('host')}/share/${token}`;
+            const url = `${req.protocol}://${req.get('host')}/index.html?token=${token}`;
             res.send({ url, expiresAt });
         } catch (err) { next(err); }
     });
