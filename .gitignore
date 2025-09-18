@@ -1,6 +1,14 @@
+# Node modules
 node_modules
 # Keep environment variables out of version control
 .env
 .env.bak
 
+# Uploads
+uploads/
+
+# Logs
+*.Logs
+
+# Prisma
 /generated/prisma
